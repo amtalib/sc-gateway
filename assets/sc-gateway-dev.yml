@@ -1,0 +1,232 @@
+# As of March 10, 2025
+
+server:      
+    port: 7000   
+
+# --------------------------------------------------------------------------------------------------------------------
+# EUREKA REGISTRATION CONFIGURATION     
+# -------------------------------------------------------------------------          
+eureka:  
+  client:
+    registerWithEureka: true
+    fetchRegistry: true
+    serviceUrl:       
+      defaultZone: http://localhost:7001/eureka/
+    #healthcheck:
+    #  enabled: true 	      
+    # Fetches new instance faster, default is 30sec
+    #registryFetchIntervalSeconds: 5      
+  instance:
+    preferIpAddress: true     
+    ipAddress: localhost    
+    # Reduces time for detection, default is 30sec
+    #leaseRenewalIntervalInSeconds: 5
+    # Default is 30sec
+    #leaseExpirationDurationInSeconds: 10    
+
+ribbon:
+  eureka:
+    enabled: true    
+  ReadTimeout: 180000     
+  ConnectTimeout: 180000    
+  
+# --------------------------------------------------------------------------------------------------------------------  
+# CONSOLE LOGGING CONFIGURATION 
+# -------------------------------------------------------------------------
+logging:
+  level:
+    root: INFO
+    gateway.filters.logger: DEBUG
+    org.springframework.data.redis: OFF
+    org.springframework.cloud.gateway: OFF
+    org.springframework.web.reactive.function.client: OFF
+  request:
+    headers_enabled: false
+    activities_enabled: true
+  response:
+    headers-enabled: true
+    activities-enabled: true
+  exception-enabled: true
+    
+# --------------------------------------------------------------------------------------------------------------------
+# CUSTOM VALIDATION CONFIGURATION 
+# -------------------------------------------------------------------------
+validation:
+  api-token:
+    enabled: false
+      
+# --------------------------------------------------------------------------------------------------------------------
+# CUSTOM HEADERS 
+# -------------------------------------------------------------------------
+headers:
+  forwarding:
+    jwt-iss-enabled: false      
+      
+      
+# --------------------------------------------------------------------------------------------------------------------
+# CIRCUIT-BREAKER / RESILIENCE 4J CONFIGURATION 
+# -------------------------------------------------------------------------
+# Pls backup below configuration before making any changes.
+# Config version 1.0 - Unit Tested by AMT
+resilience4j:
+  circuitbreaker:
+    instances:
+      # Circuit-breaker configuration for Service ID: service-a-503  
+      service-a-503:         
+        # Open circuit with 50% of requests fail.
+        failureRateThreshold: 50
+        # Allow 3 test requests
+        permittedNumberOfCallsInHalfOpenState: 3
+        # Check every 3 seconds
+        maxWaitDurationInHalfOpenState: 5s
+        # Reduce downtime from default (60sec)
+        waitDurationInOpenState: 5s                
+        slidingWindowSize: 10        
+        minimumNumberOfCalls: 5               
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+
+# --------------------------------------------------------------------------------------------------------------------
+# ROUTING CONFIGURATION  
+# -------------------------------------------------------------------------
+spring:  
+  redis:
+    host: 10.86.95.60
+    port: 5001
+    password: 1Love@Caishen    
+  cloud:
+    loadbalancer:       
+      # By default, traffic is routed to upstream services, even if they are unhealthy. To prevent picking a bad one, health-check configuration is enabled.       
+      health-check:          
+        # Set to false to turn-off health-check. Set to true if automatic fail-over is activated.
+        enabled: true        
+        # NOTE: Fine tuned based on circuit-breaker requirements in SC-Gateway. Orginal value: 5
+        interval: 5s                  
+    gateway:    
+      httpclient:
+        # If true, automatic console logging is enabled.
+        wiretap: true      
+      # Zuul-like dynamic routing where any registered service is automatically available
+      discovery:
+        locator:
+          # If enabled, services are auto exposed by this gateway even without explicitly defining the route. 
+          enabled: false
+          lower-case-service-id: true   
+          
+      # Routing defination.
+      # Only works if auto discovery (spring.cloud.gateway.discovery.locator.enabled) is turned off.
+      routes:
+        - id: service-a
+          uri: lb://SERVICE-A/
+          # Routing filters are defined here.
+          filters:
+            # Need to rewrite path to remove /api/service-a before routing
+            - RewritePath=/api/dev/service-a/?(?<segment>.*), /$\{segment}            
+            # Set Max header size
+            - RequestHeaderSize=10B            
+            # Set Max Request Body size to 1MB
+            - name: RequestSize
+              args:
+                maxSize: 1000000            
+            # Automatic failover configuration.
+            - name: Retry
+              args:
+                retries: 1
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, INTERNAL_SERVER_ERROR, GATEWAY_TIMEOUT
+                methods: GET, POST
+                # Impact of below config: 
+                # 1. Retries up to X times if the service is down; 
+                # 2. Uses exponential backoff (500ms -> 1s -> 2s) to avoid overloading; 
+                # 3. Seamlessly fails over to a new instance when it become available.
+                backoff:
+                  # Start with 500ms retry delay  
+                  firstBackoff: 500ms
+                  # Max wait before retry. Orginal value is 2s
+                  maxBackoff: 2s
+                  # Exponential backoff. Orginal value is 2
+                  factor: 2     
+            # Circuit-breaker configuration.
+            #- name: CircuitBreaker
+            #  args:
+                # See resilience4j.circuitbreaker.instances
+            #    name: service-a-503
+            #    fallbackUri: forward:/fallback503
+            #    statusCodes:
+            #      - 500
+            #      - 501
+            #      - 502
+            #      - 503
+            #      - 504                  
+            # Throttline/Rate Limiter configuration.
+            - name: RequestRateLimiter
+              args:
+                # Requests per second. This determines how many requests are allowed per second (or other time interval) without any requests being dropped.
+                redis-rate-limiter.replenishRate: 1
+                # Maximum tokens that can be accumulated. This sets the maximum number of requests that can be accommodated in a short period, even if the replenish rate is exceeded. It allows for handling occasional spikes in traffic without immediately dropping requests.
+                redis-rate-limiter.burstCapacity: 2
+                # Defines how many tokens a request would cost. Typically, it is set to 1.
+                #redis-rate-limiter.requestedTokens: 1             
+                # Key resolver to identify users.                  
+                #   See RateLimiterResolver.class -> rateLimiterResolver
+                key-resolver: "#{@rateLimiterResolver}"
+          predicates:
+            # Format: /api/<environment>/<service-id>/**
+            # Dev environment: 
+            - Path=/api/dev/service-a/**        
+
+        - id: service-b
+          uri: lb://SERVICE-B/
+          # Routing filters are defined here.
+          filters:
+            # Need to rewrite path to remove /api/service-a before routing
+            - RewritePath=/api/dev/service-b/?(?<segment>.*), /$\{segment}
+            # Set Max header size
+            - RequestHeaderSize=10B            
+            # Set Max Request Body size to 1MB
+            - name: RequestSize
+              args:
+                maxSize: 1000000               
+            # Automatic failover configuration.
+            - name: Retry
+              args:
+                retries: 1
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE, INTERNAL_SERVER_ERROR, GATEWAY_TIMEOUT
+                methods: GET, POST, PATCH
+                # Impact of below config: 
+                # 1. Retries up to 3 times if the service is down; 
+                # 2. Uses exponential backoff (500ms -> 1s -> 2s) to avoid overloading; 
+                # 3. Seamlessly fails over to a new instance when it become available.
+                backoff:
+                  # Start with 500ms retry delay  
+                  firstBackoff: 500ms
+                  # Max wait before retry. Orginal value is 2s
+                  maxBackoff: 2s
+                  # Exponential backoff. Orginal value is 2
+                  factor: 2     
+            # Circuit-breaker configuration.
+            - name: CircuitBreaker
+              args:
+                # See resilience4j.circuitbreaker.instances
+                name: service-a-503
+                fallbackUri: forward:/fallback503
+                statusCodes:
+                  - 500
+                  - 501
+                  - 502
+                  - 503
+                  - 504                  
+            # Throttline/Rate Limiter configuration.
+            - name: RequestRateLimiter
+              args:
+                # Requests per second. This determines how many requests are allowed per second (or other time interval) without any requests being dropped.
+                redis-rate-limiter.replenishRate: 1
+                # Maximum tokens that can be accumulated. This sets the maximum number of requests that can be accommodated in a short period, even if the replenish rate is exceeded. It allows for handling occasional spikes in traffic without immediately dropping requests.
+                redis-rate-limiter.burstCapacity: 2
+                # Defines how many tokens a request would cost. Typically, it is set to 1.
+                #redis-rate-limiter.requestedTokens: 1             
+                # Key resolver to identify users.                  
+                #   See RateLimiterResolver.class -> rateLimiterResolver
+                key-resolver: "#{@rateLimiterResolver}"
+          predicates:
+            # Format: /api/<environment>/<service-id>/**
+            # Dev environment: 
+            - Path=/api/dev/service-b/**   

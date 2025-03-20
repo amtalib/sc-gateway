@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: sc-gateway 
+  profiles:
+    #active: dev
+    active: ${ACTIVE_PROFILE}
+  config:     
+    #import: "optional:configserver:http://localhost:10001"
+    import: "optional:configserver:${CONFIG_SERVER}"
+  cloud:
+    config: 
+      fail-fast: true
+      #username: demo
+      username: ${CONFIG_SERVER_USERNAME}
+      #password: demo
+      password: ${CONFIG_SERVER_PASSWORD}

@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: service-a
+          
+server:
+  port: 7102
+  servlet:
+    # Should be the same with the application name.
+    context-path: '/service-a'
+
+eureka:
+  client:
+    registerWithEureka: true
+    fetchRegistry: true
+    serviceUrl:       
+      defaultZone: http://localhost:7001/eureka/
+    healthcheck:
+      enabled: true 			
+    # Fetches new instance faster, default is 30sec
+    registry-fetch-interval-seconds: 5
+  instance:
+    preferIpAddress: true
+    #ipAddress: ${INSTANCE_HOSTNAME}
+    ipAddress: localhost
+    # Reduces time for detection, default is 30sec
+    lease-renewal-interval-in-seconds: 10
+    # Default is 30sec
+    lease-expiration-duration-in-seconds: 5
+
+management:
+  info:
+    env:     
+      enabled: true
+    git:
+      mode: full						
+  # Added to enable actuator endpoints
+  endpoints:
+    web:     
+      exposure:
+        # To view all available URLs in the actuator, invoke http://localhost:7101/<application context-path>a/actuator
+        include: "*"
+        exclude: threaddump
+  endpoint:
+    health:
+      show-details: always								
+    metrics:
+      access: read-only
