@@ -41,7 +41,7 @@ logging:
     org.springframework.cloud.gateway: OFF
     org.springframework.web.reactive.function.client: OFF
   request:
-    headers_enabled: false
+    headers_enabled: true
     activities_enabled: true
   response:
     headers-enabled: true
@@ -60,8 +60,9 @@ validation:
 # -------------------------------------------------------------------------
 headers:
   forwarding:
-    jwt-iss-enabled: false      
-      
+    jwt-iss-enabled: true
+    jwt-sub-enabled: true
+    jwt-authorization-enabled: true
       
 # --------------------------------------------------------------------------------------------------------------------
 # CIRCUIT-BREAKER / RESILIENCE 4J CONFIGURATION 
@@ -122,7 +123,7 @@ spring:
             # Need to rewrite path to remove /api/service-a before routing
             - RewritePath=/api/dev/service-a/?(?<segment>.*), /$\{segment}            
             # Set Max header size
-            - RequestHeaderSize=10B            
+            - RequestHeaderSize=5000B            
             # Set Max Request Body size to 1MB
             - name: RequestSize
               args:
@@ -164,7 +165,7 @@ spring:
                 # Maximum tokens that can be accumulated. This sets the maximum number of requests that can be accommodated in a short period, even if the replenish rate is exceeded. It allows for handling occasional spikes in traffic without immediately dropping requests.
                 redis-rate-limiter.burstCapacity: 2
                 # Defines how many tokens a request would cost. Typically, it is set to 1.
-                #redis-rate-limiter.requestedTokens: 1             
+                redis-rate-limiter.requestedTokens: 1             
                 # Key resolver to identify users.                  
                 #   See RateLimiterResolver.class -> rateLimiterResolver
                 key-resolver: "#{@rateLimiterResolver}"
@@ -172,6 +173,14 @@ spring:
             # Format: /api/<environment>/<service-id>/**
             # Dev environment: 
             - Path=/api/dev/service-a/**        
+          metadata:
+            cors:
+                allowedOrigins: '*'
+                allowedMethods:
+                  - GET
+                  - POST
+                allowedHeaders: '*'
+                maxAge: 30            
 
         - id: service-b
           uri: lb://SERVICE-B/
@@ -180,7 +189,7 @@ spring:
             # Need to rewrite path to remove /api/service-a before routing
             - RewritePath=/api/dev/service-b/?(?<segment>.*), /$\{segment}
             # Set Max header size
-            - RequestHeaderSize=10B            
+            - RequestHeaderSize=10000B            
             # Set Max Request Body size to 1MB
             - name: RequestSize
               args:
